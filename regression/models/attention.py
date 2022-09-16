@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+
 class MultiHeadAttn(nn.Module):
     def __init__(self, dim_q, dim_k, dim_v, dim_out, num_heads=8):
         super().__init__()
@@ -21,8 +22,12 @@ class MultiHeadAttn(nn.Module):
     def gather(self, x):
         return torch.cat(x.chunk(self.num_heads, -3), -1)
 
-    def attend(self, q, k, v, mask=None):
+    def attend(self, q, k, v, mask=None, permute_dims=False):
         q_, k_, v_ = [self.scatter(x) for x in [q, k, v]]
+        if permute_dims:
+            q_ = q_.permute(0, 2, 1)
+            k_ = k_.permute(0, 2, 1)
+            v_ = v_.permute(0, 2, 1)
         A_logits = q_ @ k_.transpose(-2, -1) / math.sqrt(self.dim_out)
         if mask is not None:
             mask = mask.bool().to(q.device)
@@ -32,11 +37,14 @@ class MultiHeadAttn(nn.Module):
             A = A.masked_fill(torch.isnan(A), 0.0)
         else:
             A = torch.softmax(A_logits, -1)
-        return self.gather(A @ v_)
+        attended_values = A @ v_
+        if permute_dims:
+            attended_values = attended_values.permute(0, 2, 1)
+        return self.gather(attended_values)
 
-    def forward(self, q, k, v, mask=None):
+    def forward(self, q, k, v, mask=None, permute_dims=False):
         q, k, v = self.fc_q(q), self.fc_k(k), self.fc_v(v)
-        out = self.ln1(q + self.attend(q, k, v, mask=mask))
+        out = self.ln1(q + self.attend(q, k, v, mask=mask, permute_dims=permute_dims))
         out = self.ln2(out + F.relu(self.fc_out(out)))
         return out
 
@@ -45,4 +53,4 @@ class SelfAttn(MultiHeadAttn):
         super().__init__(dim_in, dim_in, dim_in, dim_out, num_heads)
 
     def forward(self, x, mask=None):
-        return super().forward(x, x, x, mask=mask)
+        return super().forward(x, x, x, mask=mask, permute_dims=False)

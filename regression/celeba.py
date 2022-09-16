@@ -1,21 +1,22 @@
+import argparse
 import os
 import os.path as osp
-import argparse
-import yaml
-import torch
-import numpy as np
 import time
+
+import numpy as np
+import torch
 import uncertainty_toolbox as uct
+import yaml
+from PIL import Image
 from attrdict import AttrDict
 from tqdm import tqdm
-from copy import deepcopy
-from PIL import Image
 
-from data.image import img_to_task, task_to_img
 from data.celeba import CelebA
+from data.image import img_to_task, task_to_img
+from utils.log import get_logger, RunningAverage
 from utils.misc import load_module
 from utils.paths import results_path, evalsets_path
-from utils.log import get_logger, RunningAverage
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -97,9 +98,8 @@ def train(args, model):
         yaml.dump(args.__dict__, f)
 
     train_ds = CelebA(train=True)
-    train_loader = torch.utils.data.DataLoader(train_ds,
-        batch_size=args.train_batch_size,
-        shuffle=True, num_workers=4)
+    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=args.train_batch_size,
+                                               shuffle=True, num_workers=4)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(

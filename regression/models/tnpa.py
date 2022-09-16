@@ -4,8 +4,8 @@ import torch.nn.functional as F
 from torch.distributions.normal import Normal
 from attrdict import AttrDict
 
-from utils.misc import stack
-from models.tnp import TNP
+from regression.utils.misc import stack
+from regression.models.tnp import TNP
 
 
 class TNPA(TNP):

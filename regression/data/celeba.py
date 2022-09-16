@@ -1,7 +1,8 @@
 import torch
 import os.path as osp
 
-from utils.paths import datasets_path
+from regression.utils.paths import datasets_path
+
 
 class CelebA(object):
     def __init__(self, train=True):
@@ -20,6 +21,7 @@ class CelebA(object):
 
     def __getitem__(self, index):
         return self.data[index], self.targets[index]
+
 
 if __name__ == '__main__':
     import os

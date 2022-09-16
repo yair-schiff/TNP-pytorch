@@ -6,6 +6,9 @@ import re
 import matplotlib
 from matplotlib import pyplot as plt
 from os.path import split, splitext
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.summary import hparams
+
 
 def get_logger(filename, mode='a'):
     logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -16,6 +19,7 @@ def get_logger(filename, mode='a'):
     logger.addHandler(logging.FileHandler(filename, mode=mode))
     logger.addHandler(logging.StreamHandler())
     return logger
+
 
 class RunningAverage(object):
     def __init__(self, *keys):
@@ -65,6 +69,7 @@ class RunningAverage(object):
         if show_et:
             line += f'({time.time()-self.clock:.3f} secs)'
         return line
+
 
 def get_log(fileroot):
     step = []
@@ -118,3 +123,18 @@ def plot_log(fileroot, x_begin=None, x_end=None):
     filename = splitext(file)[0]
     plt.savefig(dir + "/" + filename + f"-{x_begin}-{x_end}.png")
     plt.clf()  # clear current figure
+
+
+class CustomSummaryWriter(SummaryWriter):
+    def add_hparams(self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None):
+        torch._C._log_api_usage_once("tensorboard.logging.add_hparams")
+        if type(hparam_dict) is not dict or type(metric_dict) is not dict:
+            raise TypeError('hparam_dict and metric_dict should be dictionary.')
+        exp, ssi, sei = hparams(hparam_dict, metric_dict, hparam_domain_discrete)
+
+        self.file_writer.add_summary(exp)
+        self.file_writer.add_summary(ssi)
+        self.file_writer.add_summary(sei)
+        for k, v in metric_dict.items():
+            if v is not None:
+                self.add_scalar(k, v)

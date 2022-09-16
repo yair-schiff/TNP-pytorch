@@ -6,7 +6,7 @@ from torch.distributions import Normal
 from models.attention import MultiHeadAttn, SelfAttn
 
 
-__all__ = ['PoolingEncoder', 'CrossAttnEncoder', 'Decoder']
+__all__ = ['PoolingEncoder', 'CrossAttnEncoder', 'Decoder', 'build_mlp']
 
 
 def build_mlp(dim_in, dim_hid, dim_out, depth):
@@ -75,7 +75,7 @@ class CrossAttnEncoder(nn.Module):
 
     def forward(self, xc, yc, xt, mask=None):
         q, k = self.net_qk(xt), self.net_qk(xc)
-        v = self.net_v(torch.cat([xc, yc], -1))
+        v = self.net_v(torch.cat([xc, yc], -1))  # bsz x m x 2 --> 2 = x_dim + y_dim; m = # num context
 
         if hasattr(self, 'self_attn'):
             v = self.self_attn(v, mask=mask)
@@ -121,6 +121,7 @@ class NeuCrossAttnEncoder(nn.Module):
             return Normal(mu, sigma)
         else:
             return out
+
 
 class Decoder(nn.Module):
     def __init__(self, dim_x=1, dim_y=1,

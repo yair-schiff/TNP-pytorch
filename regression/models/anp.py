@@ -1,12 +1,11 @@
 import torch
 import torch.nn as nn
-from torch.distributions import kl_divergence
 from attrdict import AttrDict
+from torch.distributions import kl_divergence
 
-from utils.misc import stack, logmeanexp
-from utils.sampling import sample_subset
+from regression.models.modules import CrossAttnEncoder, PoolingEncoder, Decoder
+from regression.utils.misc import stack, logmeanexp, forward_plot_func
 
-from models.modules import CrossAttnEncoder, PoolingEncoder, Decoder
 
 class ANP(nn.Module):
     def __init__(self,
@@ -21,7 +20,6 @@ class ANP(nn.Module):
             dec_depth=3):
 
         super().__init__()
-
         self.denc = CrossAttnEncoder(
                 dim_x=dim_x,
                 dim_y=dim_y,
@@ -59,7 +57,7 @@ class ANP(nn.Module):
         pred_dist = self.predict(xc, yc, xt, z, num_samples)
         return pred_dist.loc
 
-    def forward(self, batch, num_samples=None, reduce_ll=True):
+    def forward(self, batch, num_samples=None, reduce_ll=True, plot_func=False):
         outs = AttrDict()
         if self.training:
             pz = self.lenc(batch.xc, batch.yc)
@@ -87,6 +85,9 @@ class ANP(nn.Module):
 
         else:
             py = self.predict(batch.xc, batch.yc, batch.x, num_samples=num_samples)
+            if plot_func:
+                forward_plot_func(nt=10, batch=batch, mean=py.mean, std=py.stddev,
+                                  ll=py.log_prob(batch.y).sum(-1)[:, batch.yc.shape[1]:])
             if num_samples is None:
                 ll = py.log_prob(batch.y).sum(-1)
             else:

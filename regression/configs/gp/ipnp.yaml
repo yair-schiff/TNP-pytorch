@@ -1,0 +1,11 @@
+dim_x: 1
+dim_y: 1
+data_emb_dim: 64
+latent_dim_mult: 2
+H_A_dim: 32
+use_H_A: False
+num_induce: 16
+num_heads: 8
+num_spin_blocks: 2
+dec_dim: 128
+bound_std: False

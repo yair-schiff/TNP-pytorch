@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from attrdict import AttrDict
 
-from models.modules import PoolingEncoder, Decoder
+from regression.models.modules import PoolingEncoder, Decoder
+
 
 class CNP(nn.Module):
     def __init__(self,

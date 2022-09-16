@@ -1,20 +1,22 @@
+import argparse
 import os
 import os.path as osp
-import argparse
-import yaml
-import torch
-import numpy as np
 import time
-import matplotlib.pyplot as plt
-import uncertainty_toolbox as uct
-from attrdict import AttrDict
-from tqdm import tqdm
-from copy import deepcopy
 
-from data.gp import *
-from utils.misc import load_module
-from utils.paths import results_path, evalsets_path
-from utils.log import get_logger, RunningAverage
+import matplotlib.pyplot as plt
+import torch
+import uncertainty_toolbox as uct
+import yaml
+from attrdict import AttrDict
+# from torch.utils.tensorboard import SummaryWriter
+from torchsummaryX import summary
+from tqdm import tqdm
+
+from regression.data.gp import *
+from regression.utils.log import get_logger, RunningAverage, CustomSummaryWriter
+from regression.utils.misc import load_module, Capturing
+from regression.utils.paths import results_path, evalsets_path
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -25,10 +27,13 @@ def main():
     parser.add_argument('--resume', type=str, default=None)
 
     # Data
-    parser.add_argument('--max_num_points', type=int, default=50)
+    parser.add_argument('--max_num_pts', type=int, default=50)
+    parser.add_argument('--min_num_ctx', type=int, default=3)
+    parser.add_argument('--min_num_tar', type=int, default=3)
 
     # Model
-    parser.add_argument('--model', type=str, default="tnpd")
+    parser.add_argument('--model', type=str, default="tnpd",
+                        choices=["np", "anp", "cnp", "canp", "bnp", "banp", "tnpd", "tnpa", "tnpnd", "ipnp", "iptnpd"])
 
     # Train
     parser.add_argument('--train_seed', type=int, default=0)
@@ -57,47 +62,55 @@ def main():
     parser.add_argument('--start_time', type=str, default=None)
 
     # OOD settings
-    parser.add_argument('--eval_kernel', type=str, default='rbf')
+    parser.add_argument('--eval_kernel', type=str, default='rbf', choices=['all', 'matern', 'periodic', 'rbf'])
     parser.add_argument('--t_noise', type=float, default=None)
 
     args = parser.parse_args()
 
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    args.exp_title = f'gp_maxpts-{args.max_num_pts}_minctx-{args.min_num_ctx}_mintar-{args.min_num_tar}'
     if args.expid is not None:
-        args.root = osp.join(results_path, 'gp', args.model, args.expid)
+        args.root = osp.join(results_path, args.exp_title, args.model, args.expid)
     else:
-        args.root = osp.join(results_path, 'gp', args.model)
+        args.root = osp.join(results_path, args.exp_title, args.model)
+    os.makedirs(args.root, exist_ok=True)
+    tb = CustomSummaryWriter(log_dir=args.root)
 
     model_cls = getattr(load_module(f'models/{args.model}.py'), args.model.upper())
     with open(f'configs/gp/{args.model}.yaml', 'r') as f:
         config = yaml.safe_load(f)
+        args.__dict__.update(config)
 
-    if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp", "tnpd", "tnpa", "tnpnd"]:
-        model = model_cls(**config)
-    model.cuda()
+    model = model_cls(**config).to(device)
 
     if args.mode == 'train':
-        train(args, model)
+        train(args, model, device=device, tb=tb)
     elif args.mode == 'eval':
-        eval(args, model)
+        eval(args, model, device=device)
     elif args.mode == 'eval_all_metrics':
-        eval_all_metrics(args, model)
+        eval_all_metrics(args, model, device=device)
     elif args.mode == 'plot':
-        plot(args, model)
+        plot(args, model, device=device)
 
-def train(args, model):
+
+def train(args, model, device, tb=None):
     if osp.exists(args.root + '/ckpt.tar'):
         if args.resume is None:
             raise FileExistsError(args.root)
-    else:
-        os.makedirs(args.root, exist_ok=True)
 
     with open(osp.join(args.root, 'args.yaml'), 'w') as f:
         yaml.dump(args.__dict__, f)
 
-    path, filename = get_eval_path(args)
-    if not osp.isfile(osp.join(path, filename)):
-        print('generating evaluation sets...')
-        gen_evalset(args)
+    eval_kernels = ['matern', 'rbf', 'periodic'] if args.eval_kernel == 'all' else [args.eval_kernel]
+    for ek in eval_kernels:
+        args.eval_kernel = ek
+        path, filename = get_eval_path(args)
+        if not osp.isfile(osp.join(path, filename)):
+            print('generating evaluation sets...')
+            gen_evalset(args, device=device)
+    if len(eval_kernels) > 1:
+        args.eval_kernel = 'all'
 
     torch.manual_seed(args.train_seed)
     torch.cuda.manual_seed(args.train_seed)
@@ -107,33 +120,52 @@ def train(args, model):
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=args.num_steps)
 
-    if args.resume:
+    total_train_time = 0
+    if args.resume and osp.exists(osp.join(args.root, 'ckpt.tar')):
         ckpt = torch.load(os.path.join(args.root, 'ckpt.tar'))
         model.load_state_dict(ckpt.model)
         optimizer.load_state_dict(ckpt.optimizer)
         scheduler.load_state_dict(ckpt.scheduler)
         logfilename = ckpt.logfilename
         start_step = ckpt.step
+        total_train_time = ckpt.total_train_time
+
     else:
-        logfilename = os.path.join(args.root,
-                f'train_{time.strftime("%Y%m%d-%H%M")}.log')
+        logfilename = os.path.join(args.root, f'train_{time.strftime("%Y%m%d-%H%M")}.log')
         start_step = 1
 
     logger = get_logger(logfilename)
     ravg = RunningAverage()
 
-    if not args.resume:
-        logger.info(f"Experiment: {args.model}-{args.expid}")
-        logger.info(f'Total number of parameters: {sum(p.numel() for p in model.parameters())}\n')
+    # if not args.resume:
+    logger.info(f"Experiment: {args.model}-{args.expid}" + (" (resume)" if args.resume and start_step > 1 else ""))
+    params = sum(p.numel() for p in model.parameters())
+    logger.info(f'Total number of parameters: {sum(p.numel() for p in model.parameters())}\n')
+
+    if not args.resume and tb:
+        tb.add_scalar('info/params', params, start_step-1)
 
     for step in range(start_step, args.num_steps+1):
         model.train()
         optimizer.zero_grad()
         batch = sampler.sample(
             batch_size=args.train_batch_size,
-            max_num_points=args.max_num_points,
-            device='cuda')
-        
+            max_num_pts=args.max_num_pts,
+            min_num_ctx=args.min_num_ctx,
+            device=device)
+
+        # On first step write param summary
+        if step == start_step == 1:
+            with torch.no_grad():
+                with Capturing() as output:
+                    if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
+                        summary(model, batch, num_samples=args.train_num_samples)
+                    else:
+                        summary(model, batch)
+            with open(os.path.join(args.root, 'param_count.txt'), 'w') as pf:
+                for line in output:
+                    pf.write(line + '\n')
+        step_start_time = time.time()
         if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
             outs = model(batch, num_samples=args.train_num_samples)
         else:
@@ -142,6 +174,11 @@ def train(args, model):
         outs.loss.backward()
         optimizer.step()
         scheduler.step()
+        total_train_time += time.time() - step_start_time
+        if tb:
+            for k, v in outs.items():
+                tb.add_scalar(f'train/{k}', v.item(), step)
+            tb.add_scalar('train/time', total_train_time, step)
 
         for key, val in outs.items():
             ravg.update(key, val)
@@ -154,9 +191,10 @@ def train(args, model):
             logger.info(line)
 
             if step % args.eval_freq == 0:
-                line = eval(args, model)
-                logger.info(line + '\n')
-
+                lines = eval(args, model, device=device, tb=tb, train_step=step)
+                for line in lines:
+                    logger.info(line)
+                logger.info('\n')
             ravg.reset()
 
         if step % args.save_freq == 0 or step == args.num_steps:
@@ -166,20 +204,24 @@ def train(args, model):
             ckpt.scheduler = scheduler.state_dict()
             ckpt.logfilename = logfilename
             ckpt.step = step + 1
+            ckpt.total_train_time = total_train_time
             torch.save(ckpt, os.path.join(args.root, 'ckpt.tar'))
-
+    with open(osp.join(args.root, 'timing.log'), 'w') as f:
+        f.write(f'Total train time: {total_train_time}\n')
+        f.write(f'Avg epoch time: {total_train_time / args.num_steps}')
     args.mode = 'eval'
-    eval(args, model)
+    eval(args, model, device=device)
+
 
 def get_eval_path(args):
-    path = osp.join(evalsets_path, 'gp')
+    path = osp.join(evalsets_path, args.exp_title)  # 'gp_maxpts-50_minctx-3_mintar-3')
     filename = f'{args.eval_kernel}-seed{args.eval_seed}'
     if args.t_noise is not None:
         filename += f'_{args.t_noise}'
     filename += '.tar'
     return path, filename
 
-def gen_evalset(args):
+def gen_evalset(args, device):
     if args.eval_kernel == 'rbf':
         kernel = RBFKernel()
     elif args.eval_kernel == 'matern':
@@ -192,11 +234,11 @@ def gen_evalset(args):
 
     sampler = GPSampler(kernel, t_noise=args.t_noise, seed=args.eval_seed)
     batches = []
-    for i in tqdm(range(args.eval_num_batches), ascii=True):
+    for _ in tqdm(range(args.eval_num_batches), ascii=True):
         batches.append(sampler.sample(
             batch_size=args.eval_batch_size,
-            max_num_points=args.max_num_points,
-            device='cuda'))
+            max_num_pts=args.max_num_pts,
+            device=device))
 
     torch.manual_seed(time.time())
     torch.cuda.manual_seed(time.time())
@@ -206,12 +248,12 @@ def gen_evalset(args):
         os.makedirs(path)
     torch.save(batches, osp.join(path, filename))
 
-def eval(args, model):
+def eval(args, model, device, train_step=None, tb=None):
     # eval a trained model on log-likelihood
     if args.mode == 'eval':
-        ckpt = torch.load(os.path.join(args.root, 'ckpt.tar'), map_location='cuda')
+        ckpt = torch.load(os.path.join(args.root, 'ckpt.tar'), map_location=device)
         model.load_state_dict(ckpt.model)
-        if args.eval_logfile is None:
+        if not args.eval_logfile:
             eval_logfile = f'eval_{args.eval_kernel}'
             if args.t_noise is not None:
                 eval_logfile += f'_tn_{args.t_noise}'
@@ -219,51 +261,64 @@ def eval(args, model):
         else:
             eval_logfile = args.eval_logfile
         filename = os.path.join(args.root, eval_logfile)
-        logger = get_logger(filename, mode='w')
+        logger = get_logger(filename, mode='a')
     else:
         logger = None
-
-    path, filename = get_eval_path(args)
-    if not osp.isfile(osp.join(path, filename)):
-        print('generating evaluation sets...')
-        gen_evalset(args)
-    eval_batches = torch.load(osp.join(path, filename))
 
     if args.mode == "eval":
         torch.manual_seed(args.eval_seed)
         torch.cuda.manual_seed(args.eval_seed)
 
-    ravg = RunningAverage()
-    model.eval()
-    with torch.no_grad():
-        for batch in tqdm(eval_batches, ascii=True):
-            for key, val in batch.items():
-                batch[key] = val.cuda()
-            if args.model in ["np", "anp", "bnp", "banp"]:
-                outs = model(batch, args.eval_num_samples)
-            else:
-                outs = model(batch)
+    eval_kernels = ['matern', 'rbf', 'periodic'] if args.eval_kernel == 'all' else [args.eval_kernel]
+    lines = []
+    for ek in eval_kernels:
+        args.eval_kernel = ek
+        path, filename = get_eval_path(args)
+        if not osp.isfile(osp.join(path, filename)):
+            print('generating evaluation sets...')
+            gen_evalset(args, device)
+        eval_batches = torch.load(osp.join(path, filename), map_location=device)
 
-            for key, val in outs.items():
-                ravg.update(key, val)
+        ravg = RunningAverage()
+        model.eval()
+        with torch.no_grad():
+            for i, batch in tqdm(enumerate(eval_batches), ascii=True):
+                for key, val in batch.items():
+                    batch[key] = val.to(device)
+                if args.model in ["np", "anp", "bnp", "banp"]:
+                    outs = model(batch, args.eval_num_samples)
+                else:
+                    outs = model(batch)
 
-    torch.manual_seed(time.time())
-    torch.cuda.manual_seed(time.time())
+                for key, val in outs.items():
+                    ravg.update(key, val)
+        metric_dict = {f'val/{ek}/{k}': None for k in ravg.keys()}
+        torch.manual_seed(time.time())
+        torch.cuda.manual_seed(time.time())
 
-    line = f'{args.model}:{args.expid} {args.eval_kernel} '
-    if args.t_noise is not None:
-        line += f'tn {args.t_noise} '
-    line += ravg.info()
+        line = f'{args.model}:{args.expid} {args.eval_kernel} '
+        if args.t_noise is not None:
+            line += f'tn {args.t_noise} '
+        line += ravg.info()
+        if tb:
+            for k in ravg.keys():
+                tb.add_scalar(f'val/{ek}/{k}', ravg.sum[k] / ravg.cnt[k], train_step)
+                tb.add_hparams(metric_dict=metric_dict,
+                               hparam_dict=args.__dict__,
+                               run_name=os.path.dirname(os.path.realpath(__file__)) + os.sep + args.root)
 
-    if logger is not None:
-        logger.info(line)
+        if logger is not None:
+            logger.info(line)
 
-    return line
+        lines.append(line)
+    if len(eval_kernels) > 1:
+        args.eval_kernel = 'all'
+    return lines
 
 
-def eval_all_metrics(args, model):
+def eval_all_metrics(args, model, device):
     # eval a trained model on log-likelihood, rsme, calibration, and sharpness
-    ckpt = torch.load(os.path.join(args.root, 'ckpt.tar'), map_location='cuda')
+    ckpt = torch.load(os.path.join(args.root, 'ckpt.tar'), map_location=device)
     model.load_state_dict(ckpt.model)
     if args.eval_logfile is None:
         eval_logfile = f'eval_{args.eval_kernel}'
@@ -280,7 +335,7 @@ def eval_all_metrics(args, model):
     if not osp.isfile(osp.join(path, filename)):
         print('generating evaluation sets...')
         gen_evalset(args)
-    eval_batches = torch.load(osp.join(path, filename))
+    eval_batches = torch.load(osp.join(path, filename), map_location=device)
 
     if args.mode == "eval_all_metrics":
         torch.manual_seed(args.eval_seed)
@@ -291,7 +346,7 @@ def eval_all_metrics(args, model):
         ravgs = [RunningAverage() for _ in range(4)] # 4 types of metrics
         for batch in tqdm(eval_batches, ascii=True):
             for key, val in batch.items():
-                batch[key] = val.cuda()
+                batch[key] = val.to(device)
             if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
                 outs = model.predict(batch.xc, batch.yc, batch.xt, num_samples=args.eval_num_samples)
                 ll = model(batch, num_samples=args.eval_num_samples)
@@ -350,14 +405,14 @@ def eval_all_metrics(args, model):
     return line
 
 
-def plot(args, model):
+def plot(args, model, device):
     seed = args.plot_seed
     num_smp = args.plot_num_samples
 
     if args.mode == "plot":
-        ckpt = torch.load(os.path.join(args.root, 'ckpt.tar'), map_location='cuda')
+        ckpt = torch.load(os.path.join(args.root, 'ckpt.tar'), map_location=device)
         model.load_state_dict(ckpt.model)
-    model = model.cuda()
+    model = model.to(device)
 
     def tnp(x):
         return x.squeeze().cpu().data.numpy()
@@ -365,12 +420,12 @@ def plot(args, model):
     kernel = RBFKernel()
     sampler = GPSampler(kernel, t_noise=args.t_noise, seed=args.eval_seed)
 
-    xp = torch.linspace(-2, 2, 200).cuda()
+    xp = torch.linspace(-2, 2, 200).to(device)
     batch = sampler.sample(
         batch_size=args.plot_batch_size,
         num_ctx=args.plot_num_ctx,
         num_tar=args.plot_num_tar,
-        device='cuda',
+        device=device,
     )
 
     torch.manual_seed(seed)
@@ -454,6 +509,7 @@ def plot(args, model):
     plt.savefig(save_dir_2)
     print(f"Evaluation Plot saved at {save_dir_1}\n")
     print(f"Evaluation Plot saved at {save_dir_2}\n")
+
 
 if __name__ == '__main__':
     main()

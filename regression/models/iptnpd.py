@@ -4,33 +4,45 @@ import torch.nn.functional as F
 from torch.distributions.normal import Normal
 from attrdict import AttrDict
 
-from regression.models.tnp import TNP
+from regression.models.iptnp import IPTNP
 from regression.utils.misc import forward_plot_func
 
 
-class TNPD(TNP):
+class IPTNPD(IPTNP):
     def __init__(
-        self,
-        dim_x,
-        dim_y,
-        d_model,
-        emb_depth,
-        dim_feedforward,
-        nhead,
-        dropout,
-        num_layers,
-        bound_std=False
-    ):
-        super(TNPD, self).__init__(
+            self,
             dim_x,
             dim_y,
             d_model,
             emb_depth,
             dim_feedforward,
             nhead,
-            dropout,
             num_layers,
-            bound_std
+            dropout,
+            bound_std,
+            num_induce=16,
+            latent_dim_mult=1,
+            use_H_A=False,
+            H_A_dim=1,
+            num_spin_heads=8,
+            num_spin_blocks=1,
+    ):
+        super(IPTNPD, self).__init__(
+            dim_x,
+            dim_y,
+            d_model,
+            emb_depth,
+            dim_feedforward,
+            nhead,
+            num_layers,
+            dropout,
+            bound_std,
+            num_induce,
+            latent_dim_mult,
+            use_H_A,
+            H_A_dim,
+            num_spin_heads,
+            num_spin_blocks
         )
         
         self.predictor = nn.Sequential(
@@ -56,7 +68,7 @@ class TNPD(TNP):
             outs.tar_ll = pred_tar.log_prob(batch.yt).sum(-1).mean()
         else:
             outs.tar_ll = pred_tar.log_prob(batch.yt).sum(-1)
-        outs.loss = - (outs.tar_ll)
+        outs.loss = -outs.tar_ll
 
         return outs
 
