@@ -9,7 +9,7 @@ import uncertainty_toolbox as uct
 import yaml
 from attrdict import AttrDict
 # from torch.utils.tensorboard import SummaryWriter
-from torchsummaryX import summary
+# from torchsummaryX import summary
 from tqdm import tqdm
 
 from regression.data.gp import *
@@ -155,16 +155,16 @@ def train(args, model, device, tb=None):
             device=device)
 
         # On first step write param summary
-        if step == start_step == 1:
-            with torch.no_grad():
-                with Capturing() as output:
-                    if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
-                        summary(model, batch, num_samples=args.train_num_samples)
-                    else:
-                        summary(model, batch)
-            with open(os.path.join(args.root, 'param_count.txt'), 'w') as pf:
-                for line in output:
-                    pf.write(line + '\n')
+        # if step == start_step == 1:
+        #     with torch.no_grad():
+        #         with Capturing() as output:
+        #             if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
+        #                 summary(model, batch, num_samples=args.train_num_samples)
+        #             else:
+        #                 summary(model, batch)
+        #     with open(os.path.join(args.root, 'param_count.txt'), 'w') as pf:
+        #         for line in output:
+        #             pf.write(line + '\n')
         step_start_time = time.time()
         if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
             outs = model(batch, num_samples=args.train_num_samples)
