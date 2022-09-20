@@ -3,13 +3,12 @@ import os
 import os.path as osp
 import time
 
-import matplotlib.pyplot as plt
 import torch
-import uncertainty_toolbox as uct
 import yaml
 from attrdict import AttrDict
-# from torch.utils.tensorboard import SummaryWriter
-# from torchsummaryX import summary
+from torchsummaryX import summary
+import uncertainty_toolbox as uct
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 from regression.data.gp import *
@@ -19,47 +18,57 @@ from regression.utils.paths import results_path, evalsets_path
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Regression experiment',
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     # Experiment
-    parser.add_argument('--mode', default='train', choices=['train', 'eval', 'eval_all_metrics', 'plot'])
-    parser.add_argument('--expid', type=str, default='default')
-    parser.add_argument('--resume', type=str, default=None)
+    exp_parser = parser.add_argument_group('Experiment Args')
+    exp_parser.add_argument('--mode', default='train', choices=['train', 'eval', 'eval_all_metrics', 'plot'])
+    exp_parser.add_argument('--expid', type=str, default='default')
+    exp_parser.add_argument('--resume', type=str, default=None)
 
     # Data
-    parser.add_argument('--max_num_pts', type=int, default=50)
-    parser.add_argument('--min_num_ctx', type=int, default=3)
-    parser.add_argument('--min_num_tar', type=int, default=3)
+    data_parser = parser.add_argument_group('Data Args')
+    data_parser.add_argument('--max_num_pts', type=int, default=50)
+    data_parser.add_argument('--min_num_ctx', type=int, default=3)
+    data_parser.add_argument('--min_num_tar', type=int, default=3)
 
     # Model
-    parser.add_argument('--model', type=str, default="tnpd",
-                        choices=["np", "anp", "cnp", "canp", "bnp", "banp", "tnpd", "tnpa", "tnpnd", "ipnp", "iptnpd"])
+    model_parser = parser.add_argument_group('Model Args')
+    model_parser.add_argument('--model', type=str,
+                              choices=["np", "anp", "cnp", "canp", "bnp", "banp", "tnpd", "tnpa", "tnpnd", "ipnp",
+                                       "iptnpd"])
 
     # Train
-    parser.add_argument('--train_seed', type=int, default=0)
-    parser.add_argument('--train_batch_size', type=int, default=16)
-    parser.add_argument('--train_num_samples', type=int, default=4)
-    parser.add_argument('--train_num_bs', type=int, default=10)
-    parser.add_argument('--lr', type=float, default=5e-4)
-    parser.add_argument('--num_steps', type=int, default=100000)
-    parser.add_argument('--print_freq', type=int, default=200)
-    parser.add_argument('--eval_freq', type=int, default=5000)
-    parser.add_argument('--save_freq', type=int, default=1000)
+    train_parser = parser.add_argument_group('Train Args')
+    train_parser.add_argument('--train_seed', type=int, default=0)
+    train_parser.add_argument('--train_batch_size', type=int, default=16)
+    train_parser.add_argument('--train_num_samples', type=int, default=4)
+    train_parser.add_argument('--train_num_bs', type=int, default=10)
+    train_parser.add_argument('--lr', type=float, default=5e-4)
+    train_parser.add_argument('--min_lr', type=float, default=0)
+    train_parser.add_argument('--num_steps', type=int, default=100000)
+    train_parser.add_argument('--annealer_mult', type=float, default=1.0)
+    train_parser.add_argument('--print_freq', type=int, default=200)
+    train_parser.add_argument('--eval_freq', type=int, default=5000)
+    train_parser.add_argument('--save_freq', type=int, default=1000)
 
     # Eval
-    parser.add_argument('--eval_seed', type=int, default=0)
-    parser.add_argument('--eval_num_batches', type=int, default=3000)
-    parser.add_argument('--eval_batch_size', type=int, default=16)
-    parser.add_argument('--eval_num_samples', type=int, default=50)
-    parser.add_argument('--eval_logfile', type=str, default=None)
+    eval_parser = parser.add_argument_group('Eval Args')
+    eval_parser.add_argument('--eval_seed', type=int, default=0)
+    eval_parser.add_argument('--eval_num_batches', type=int, default=3000)
+    eval_parser.add_argument('--eval_batch_size', type=int, default=16)
+    eval_parser.add_argument('--eval_num_samples', type=int, default=50)
+    eval_parser.add_argument('--eval_logfile', type=str, default=None)
 
     # Plot
-    parser.add_argument('--plot_seed', type=int, default=0)
-    parser.add_argument('--plot_batch_size', type=int, default=16)
-    parser.add_argument('--plot_num_samples', type=int, default=30)
-    parser.add_argument('--plot_num_ctx', type=int, default=30)
-    parser.add_argument('--plot_num_tar', type=int, default=10)
-    parser.add_argument('--start_time', type=str, default=None)
+    plot_parser = parser.add_argument_group('Plot Args')
+    plot_parser.add_argument('--plot_seed', type=int, default=0)
+    plot_parser.add_argument('--plot_batch_size', type=int, default=16)
+    plot_parser.add_argument('--plot_num_samples', type=int, default=30)
+    plot_parser.add_argument('--plot_num_ctx', type=int, default=30)
+    plot_parser.add_argument('--plot_num_tar', type=int, default=10)
+    plot_parser.add_argument('--start_time', type=str, default=None)
 
     # OOD settings
     parser.add_argument('--eval_kernel', type=str, default='rbf', choices=['all', 'matern', 'periodic', 'rbf'])
@@ -78,9 +87,15 @@ def main():
     tb = CustomSummaryWriter(log_dir=args.root)
 
     model_cls = getattr(load_module(f'models/{args.model}.py'), args.model.upper())
-    with open(f'configs/gp/{args.model}.yaml', 'r') as f:
-        config = yaml.safe_load(f)
-        args.__dict__.update(config)
+    if args.resume and osp.exists(osp.join(args.root, 'config.yaml')):
+        with open(osp.join(args.root, 'config.yaml'), 'r') as f:
+            config = yaml.safe_load(f)
+    else:
+        with open(f'configs/gp/{args.model}.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+            args.__dict__.update(config)
+        with open(osp.join(args.root, 'config.yaml'), 'w') as f:
+            yaml.dump(config, f)
 
     model = model_cls(**config).to(device)
 
@@ -117,8 +132,9 @@ def train(args, model, device, tb=None):
 
     sampler = GPSampler(RBFKernel())
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=args.num_steps)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
+                                                           T_max=args.num_steps*args.annealer_mult,
+                                                           eta_min=args.min_lr)
 
     total_train_time = 0
     if args.resume and osp.exists(osp.join(args.root, 'ckpt.tar')):
@@ -126,6 +142,10 @@ def train(args, model, device, tb=None):
         model.load_state_dict(ckpt.model)
         optimizer.load_state_dict(ckpt.optimizer)
         scheduler.load_state_dict(ckpt.scheduler)
+        try:
+            torch.random.set_rng_state(ckpt.torch_random_state)
+        except AttributeError:
+            print('Torch random state was not saved in previous checkpoint.')
         logfilename = ckpt.logfilename
         start_step = ckpt.step
         total_train_time = ckpt.total_train_time
@@ -142,7 +162,7 @@ def train(args, model, device, tb=None):
     params = sum(p.numel() for p in model.parameters())
     logger.info(f'Total number of parameters: {sum(p.numel() for p in model.parameters())}\n')
 
-    if not args.resume and tb:
+    if start_step == 1 and tb:
         tb.add_scalar('info/params', params, start_step-1)
 
     for step in range(start_step, args.num_steps+1):
@@ -152,22 +172,23 @@ def train(args, model, device, tb=None):
             batch_size=args.train_batch_size,
             max_num_pts=args.max_num_pts,
             min_num_ctx=args.min_num_ctx,
+            min_num_tar=args.min_num_tar,
             device=device)
 
         # On first step write param summary
-        # if step == start_step == 1:
-        #     with torch.no_grad():
-        #         with Capturing() as output:
-        #             if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
-        #                 summary(model, batch, num_samples=args.train_num_samples)
-        #             else:
-        #                 summary(model, batch)
-        #     with open(os.path.join(args.root, 'param_count.txt'), 'w') as pf:
-        #         for line in output:
-        #             pf.write(line + '\n')
+        if step == start_step == 1:
+            with torch.no_grad():
+                with Capturing() as output:
+                    if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
+                        summary(model, batch, num_samples=args.train_num_samples)  # TODO: commented this out num_samples=args.train_num_samples)
+                    else:
+                        summary(model, batch)
+            with open(os.path.join(args.root, 'param_count.txt'), 'w') as pf:
+                for line in output:
+                    pf.write(line + '\n')
         step_start_time = time.time()
         if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
-            outs = model(batch, num_samples=args.train_num_samples)
+            outs = model(batch, num_samples=args.train_num_samples)  # TODO: commented this out num_samples=args.train_num_samples)
         else:
             outs = model(batch)
 
@@ -179,6 +200,7 @@ def train(args, model, device, tb=None):
             for k, v in outs.items():
                 tb.add_scalar(f'train/{k}', v.item(), step)
             tb.add_scalar('train/time', total_train_time, step)
+            tb.add_scalar('train/lr', scheduler.get_last_lr()[0], step)
 
         for key, val in outs.items():
             ravg.update(key, val)
@@ -202,6 +224,7 @@ def train(args, model, device, tb=None):
             ckpt.model = model.state_dict()
             ckpt.optimizer = optimizer.state_dict()
             ckpt.scheduler = scheduler.state_dict()
+            ckpt.torch_random_state = torch.random.get_rng_state()
             ckpt.logfilename = logfilename
             ckpt.step = step + 1
             ckpt.total_train_time = total_train_time
@@ -221,6 +244,7 @@ def get_eval_path(args):
     filename += '.tar'
     return path, filename
 
+
 def gen_evalset(args, device):
     if args.eval_kernel == 'rbf':
         kernel = RBFKernel()
@@ -238,6 +262,8 @@ def gen_evalset(args, device):
         batches.append(sampler.sample(
             batch_size=args.eval_batch_size,
             max_num_pts=args.max_num_pts,
+            min_num_ctx=args.min_num_ctx,
+            min_num_tar=args.min_num_tar,
             device=device))
 
     torch.manual_seed(time.time())
@@ -247,6 +273,7 @@ def gen_evalset(args, device):
     if not osp.isdir(path):
         os.makedirs(path)
     torch.save(batches, osp.join(path, filename))
+
 
 def eval(args, model, device, train_step=None, tb=None):
     # eval a trained model on log-likelihood
@@ -286,7 +313,7 @@ def eval(args, model, device, train_step=None, tb=None):
                 for key, val in batch.items():
                     batch[key] = val.to(device)
                 if args.model in ["np", "anp", "bnp", "banp"]:
-                    outs = model(batch, args.eval_num_samples)
+                    outs = model(batch, num_samples=args.eval_num_samples)   # TODO: Commented this - args.eval_num_samples)
                 else:
                     outs = model(batch)
 
@@ -334,7 +361,7 @@ def eval_all_metrics(args, model, device):
     path, filename = get_eval_path(args)
     if not osp.isfile(osp.join(path, filename)):
         print('generating evaluation sets...')
-        gen_evalset(args)
+        gen_evalset(args, device=device)
     eval_batches = torch.load(osp.join(path, filename), map_location=device)
 
     if args.mode == "eval_all_metrics":
@@ -343,7 +370,7 @@ def eval_all_metrics(args, model, device):
 
     model.eval()
     with torch.no_grad():
-        ravgs = [RunningAverage() for _ in range(4)] # 4 types of metrics
+        ravgs = [RunningAverage() for _ in range(4)]  # 4 types of metrics
         for batch in tqdm(eval_batches, ascii=True):
             for key, val in batch.items():
                 batch[key] = val.to(device)
@@ -423,6 +450,7 @@ def plot(args, model, device):
     xp = torch.linspace(-2, 2, 200).to(device)
     batch = sampler.sample(
         batch_size=args.plot_batch_size,
+        max_num_pts=args.max_num_pts,
         num_ctx=args.plot_num_ctx,
         num_tar=args.plot_num_tar,
         device=device,
@@ -455,8 +483,7 @@ def plot(args, model, device):
     if args.plot_batch_size > 1:
         nrows = max(args.plot_batch_size//4, 1)
         ncols = min(4, args.plot_batch_size)
-        _, axes = plt.subplots(nrows, ncols,
-                figsize=(5*ncols, 5*nrows))
+        _, axes = plt.subplots(nrows, ncols, figsize=(5*ncols, 5*nrows))
         axes = axes.flatten()
     else:
         axes = [plt.gca()]
@@ -468,10 +495,10 @@ def plot(args, model, device):
                 ax.plot(tnp(xp), tnp(mu[s][i]), color='steelblue',
                         alpha=max(0.5/args.plot_num_samples, 0.1))
                 ax.fill_between(tnp(xp), tnp(mu[s][i])-tnp(sigma[s][i]),
-                        tnp(mu[s][i])+tnp(sigma[s][i]),
-                        color='skyblue',
-                        alpha=max(0.2/args.plot_num_samples, 0.02),
-                        linewidth=0.0)
+                                tnp(mu[s][i])+tnp(sigma[s][i]),
+                                color='skyblue',
+                                alpha=max(0.2/args.plot_num_samples, 0.02),
+                                linewidth=0.0)
             ax.scatter(tnp(batch.xc[i]), tnp(batch.yc[i]),
                        color='k', label=f'context {Nc}', zorder=mu.shape[0] + 1)
             ax.scatter(tnp(batch.xt[i]), tnp(batch.yt[i]),
@@ -483,7 +510,7 @@ def plot(args, model, device):
         for i, ax in enumerate(axes):
             ax.plot(tnp(xp), tnp(mu[i]), color='steelblue', alpha=0.5)
             ax.fill_between(tnp(xp), tnp(mu[i]-sigma[i]), tnp(mu[i]+sigma[i]),
-                    color='skyblue', alpha=0.2, linewidth=0.0)
+                            color='skyblue', alpha=0.2, linewidth=0.0)
             ax.scatter(tnp(batch.xc[i]), tnp(batch.yc[i]),
                        color='k', label=f'context {Nc}')
             ax.scatter(tnp(batch.xt[i]), tnp(batch.yt[i]),

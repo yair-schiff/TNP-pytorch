@@ -17,6 +17,7 @@ from utils.misc import load_module
 from utils.paths import results_path, evalsets_path
 from utils.log import get_logger, RunningAverage
 
+
 def main():
     parser = argparse.ArgumentParser()
 

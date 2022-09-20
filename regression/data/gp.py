@@ -1,3 +1,4 @@
+import ipdb
 import torch
 from torch.distributions import MultivariateNormal, StudentT
 from attrdict import AttrDict
@@ -52,7 +53,6 @@ class GPSampler(object):
         num_ctx = num_ctx or torch.randint(low=min_num_ctx, high=max_num_pts-min_num_tar, size=[1]).item()  # Nc
         # num_tar = num_tar or max_num_pts - num_ctx
         num_tar = num_tar or torch.randint(low=min_num_tar, high=max_num_pts-num_ctx, size=[1]).item()  # Nt
-
         num_points = num_ctx + num_tar  # N = Nc + Nt
         batch.x = x_range[0] + (x_range[1] - x_range[0]) \
                 * torch.rand([batch_size, num_points, 1], device=device)  # [B,N,Dx=1]

@@ -120,7 +120,7 @@ if [[ "${exp}" == "gp" ]]; then
 fi
 
 # Build Job name / make log dir
-job_name="${exp}_${model}_${mode}_${expid}_maxpts-${max_num_pts}_minctx-${min_num_ctx}"
+job_name="${exp}_${model}_${mode}_${expid}"
 log_dir="${results_dir}/${expid}/logs"
 mkdir -p "${log_dir}"
 

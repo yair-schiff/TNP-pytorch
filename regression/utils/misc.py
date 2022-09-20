@@ -1,3 +1,4 @@
+import argparse
 import os
 from importlib.machinery import SourceFileLoader
 import math
@@ -78,3 +79,69 @@ def forward_plot_func(nt, batch, mean, std, ll):
         ax[r, c].legend(loc='best')
     plt.show()
     return fig, ax
+
+
+def get_argparser(exp):
+    parser = argparse.ArgumentParser()
+
+    # Experiment
+    exp_parser = parser.add_argument_group('Experiment Args')
+    exp_parser.add_argument('--expid', type=str, default='default')
+    exp_parser.add_argument('--resume', type=str, default=None)
+
+    # Data
+    data_parser = parser.add_argument_group('Data Args')
+    data_parser.add_argument('--max_num_pts', type=int, default=50)
+    data_parser.add_argument('--min_num_ctx', type=int, default=3)
+    data_parser.add_argument('--min_num_tar', type=int, default=3)
+
+    # Model
+    model_parser = parser.add_argument_group('Model Args')
+    model_parser.add_argument('--model', type=str,
+                              choices=["np", "anp", "cnp", "canp", "bnp", "banp", "tnpd", "tnpa", "tnpnd", "ipnp",
+                                       "iptnpd"])
+
+    # Train
+    train_parser = parser.add_argument_group('Train Args')
+    train_parser.add_argument('--pretrain', action='store_true', default=False)
+    train_parser.add_argument('--train_seed', type=int, default=0)
+    train_parser.add_argument('--train_batch_size', type=int, default=16)
+    train_parser.add_argument('--train_num_samples', type=int, default=4)
+    train_parser.add_argument('--lr', type=float, default=5e-4)
+    train_parser.add_argument('--min_lr', type=float, default=0)
+    train_parser.add_argument('--num_epochs', type=int, default=100000 if exp == 'gp' else 200)
+    train_parser.add_argument('--annealer_mult', type=float, default=1.0)
+    train_parser.add_argument('--print_freq', type=int, default=200)
+    train_parser.add_argument('--eval_freq', type=int, default=5000)
+    train_parser.add_argument('--save_freq', type=int, default=1000)
+
+    # Eval
+    eval_parser = parser.add_argument_group('Eval Args')
+    eval_parser.add_argument('--eval_seed', type=int, default=0)
+    eval_parser.add_argument('--eval_num_batches', type=int, default=3000)
+    eval_parser.add_argument('--eval_batch_size', type=int, default=16)
+    eval_parser.add_argument('--eval_num_samples', type=int, default=50)
+    eval_parser.add_argument('--eval_logfile', type=str, default=None)
+
+    # Plot
+    plot_parser = parser.add_argument_group('Plot Args')
+    plot_parser.add_argument('--plot_seed', type=int, default=0)
+    plot_parser.add_argument('--plot_batch_size', type=int, default=16)
+    plot_parser.add_argument('--plot_num_samples', type=int, default=30)
+    plot_parser.add_argument('--plot_num_ctx', type=int, default=30)
+    plot_parser.add_argument('--plot_num_tar', type=int, default=10)
+    plot_parser.add_argument('--start_time', type=str, default=None)
+
+    ood_parser = parser.add_argument_group('OOD Args')
+    ood_parser.add_argument('--t_noise', type=float, default=None)
+
+    if exp == 'gp':
+        gp_parser = parser.add_argument_group('GP Args')
+        gp_parser.add_argument('--eval_kernel', type=str, default='rbf', choices=['matern', 'periodic', 'rbf'])
+
+    elif exp == 'emnist':
+        emnist_parser = parser.add_argument_group('EMNIST Args')
+        emnist_parser.add_argument('--class_range', type=int, nargs='*', default=[0, 10])
+        emnist_parser.add_argument('--plot_num_imgs', type=int, default=16)
+
+    return parser

@@ -2,16 +2,21 @@ import torch
 import torch.nn as nn
 
 from regression.models.attention import MultiHeadAttn
+from regression.models.modules import build_mlp
 
 
 class XABA(nn.Module):
-    def __init__(self, data_dim, latent_dim, num_heads):
+    def __init__(self, data_dim, latent_dim, latent_dim_mult, num_heads):
         super().__init__()
-        self.attr_xattn = MultiHeadAttn(dim_q=latent_dim, dim_k=data_dim, dim_v=data_dim, dim_out=latent_dim,
+        self.attr_xattn = MultiHeadAttn(dim_q=latent_dim, dim_k=data_dim, dim_v=data_dim,
+                                        dim_out=latent_dim*latent_dim_mult,
                                         num_heads=num_heads)
+        self.post_attn = nn.Linear(latent_dim * latent_dim_mult, latent_dim)
+        # self.post_attn = build_mlp(dim_in=latent_dim*latent_dim_mult, dim_hid=latent_dim, dim_out=latent_dim, depth=2)
 
     def forward(self, x, H_A, mask=None):
-        return self.attr_xattn(q=H_A, k=x, v=x, mask=mask, permute_dims=True)
+        attn = self.attr_xattn(q=H_A, k=x, v=x, mask=mask, permute_dims=True)
+        return self.post_attn(attn)
 
 
 class ABLA(nn.Module):
@@ -21,6 +26,7 @@ class ABLA(nn.Module):
                                        dim_out=latent_dim*latent_dim_mult,
                                        num_heads=num_heads)
         self.post_attn = nn.Linear(latent_dim*latent_dim_mult, latent_dim)
+        # self.post_attn = build_mlp(dim_in=latent_dim*latent_dim_mult, dim_hid=latent_dim, dim_out=latent_dim, depth=2)
 
     def forward(self, H):
         attn = self.attr_attn(q=H, k=H, v=H, mask=None, permute_dims=True)
@@ -34,6 +40,7 @@ class XABD(nn.Module):
                                         dim_out=latent_dim*latent_dim_mult,
                                         num_heads=num_heads)
         self.post_attn = nn.Linear(latent_dim*latent_dim_mult, latent_dim)
+        # self.post_attn = build_mlp(dim_in=latent_dim*latent_dim_mult, dim_hid=latent_dim, dim_out=latent_dim, depth=2)
 
     @staticmethod
     def build_mask(H_A_shape, current_ctx_size):
@@ -57,11 +64,11 @@ class SpinBlock(nn.Module):
         self.use_H_A = use_H_A
         if use_H_A:
             # Cross Attn Between Attributes
-            self.xaba = XABA(data_dim=data_dim, latent_dim=latent_dim,
+            self.xaba = XABA(data_dim=data_dim, latent_dim=latent_dim, latent_dim_mult=latent_dim_mult,
                              num_heads=num_heads)
 
             # (Self) Attn Between Latent Attributes - attribute latents
-            self.abla = ABLA(latent_dim=latent_dim, num_heads=num_heads)
+            self.abla = ABLA(latent_dim=latent_dim, latent_dim_mult=latent_dim_mult, num_heads=num_heads)
 
         # Cross Attn Between Datapoints
         self.xabd = XABD(latent_dim=latent_dim, latent_dim_mult=latent_dim_mult, num_heads=num_heads)
@@ -84,6 +91,7 @@ class Spin(nn.Module):
                  latent_dim_mult=1,
                  use_H_A=False,
                  H_A_dim=1,
+                 H_D_init='xavier',
                  num_induce=16,
                  num_heads=8,
                  num_spin_blocks=8):
@@ -91,7 +99,7 @@ class Spin(nn.Module):
         self.use_H_A = use_H_A
         if use_H_A:
             self.H_A_proj = nn.Linear(data_dim, H_A_dim)
-        self.H_D = self.init_h_d(num_inds=num_induce, latent_dim=H_A_dim if use_H_A else data_dim)
+        self.H_D = self.init_h_d(num_inds=num_induce, latent_dim=H_A_dim if use_H_A else data_dim, init=H_D_init)
         self.spin_blocks = nn.ModuleList([
             SpinBlock(
                 use_H_A=use_H_A,
@@ -102,9 +110,14 @@ class Spin(nn.Module):
         ])
 
     @staticmethod
-    def init_h_d(num_inds, latent_dim):
+    def init_h_d(num_inds, latent_dim, init='xavier'):
         induced = nn.Parameter(torch.Tensor(1, num_inds, latent_dim))
-        nn.init.xavier_uniform_(induced)
+        if init == 'xavier':
+            nn.init.xavier_uniform_(induced)
+        elif init == 'orthogonal':
+            nn.init.orthogonal_(induced)
+        else:
+            raise ValueError('Invalid H_D init method passed. Use either \'xavier\' (uniform) or \'orthogonal\'.')
         return induced
 
     def forward(self, context, mask=None):

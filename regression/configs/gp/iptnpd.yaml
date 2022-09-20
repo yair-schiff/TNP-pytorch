@@ -6,7 +6,7 @@ latent_dim_mult: 2
 dim_feedforward: 128
 nhead: 4
 dropout: 0.0
-num_layers: 6
+num_layers: 2
 H_A_dim: 32
 use_H_A: False
 num_induce: 16

@@ -7,9 +7,10 @@
 #SBATCH -n 1                                 # Total number of cores requested
 #SBATCH --get-user-env                       # retrieve the users login environment
 #SBATCH --mem=20000M                         # server memory requested (per node; 1000M ~= 1G)
-#SBATCH --gres=gpu:1                         # Type/number of GPUs needed
+#SBATCH --gres=gpu:3090:1                    # Type/number of GPUs needed
 #SBATCH --partition=gpu                 # Request partition (gpu==medium priority; kuleshov==high priority)
 #SBATCH --time=8:00:00                       # Set max runtime for job
+#SBATCH --requeue                            # Requeue job
 
 
 export PYTHONPATH="${PWD}:${PWD}/regression"
@@ -23,6 +24,10 @@ python gp.py \
   --model="${model}" \
   --expid="${expid}" \
   --mode="${mode}" \
+  --lr="${lr}" \
+  --min_lr="${min_lr}" \
+  --num_steps="${num_steps}" \
+  --annealer_mult="${annealer_mult}" \
   --max_num_pts="${max_num_pts}" \
   --min_num_ctx="${min_num_ctx}" \
   --min_num_tar="${min_num_tar}" \

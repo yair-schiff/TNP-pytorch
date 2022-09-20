@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from regression.models.modules import build_mlp
-from regression.models.spin import SpinBlock
+from regression.models.spin import Spin, SpinBlock
 
 
 class IPTNP(nn.Module):
@@ -30,35 +30,30 @@ class IPTNP(nn.Module):
         self.num_induce = num_induce
         self.embedder = build_mlp(dim_x + dim_y, d_model, d_model, emb_depth)
 
-        # self.spin = Spin(data_dim=d_model, latent_dim_mult=latent_dim_mult,
-        #                  use_H_A=use_H_A, H_A_dim=H_A_dim,
-        #                  num_induce=num_induce,
-        #                  num_heads=num_spin_heads,
-        #                  num_spin_blocks=num_spin_blocks)
+        # self.use_H_A = use_H_A
+        # if use_H_A:
+        #     self.H_A_proj = nn.Linear(d_model, H_A_dim)
+        # self.H_D = self.init_h_d(num_inds=num_induce, latent_dim=H_A_dim if use_H_A else d_model)
+        # self.spin = nn.ModuleList([
+        #     SpinBlock(
+        #         use_H_A=use_H_A,
+        #         data_dim=d_model, latent_dim=H_A_dim if use_H_A else d_model, latent_dim_mult=latent_dim_mult,
+        #         num_heads=num_spin_heads,
+        #     )
+        #     for _ in range(num_layers)
+        # ])
+        # self.encoder = nn.ModuleList([
+        #     nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, batch_first=True)
+        #     for _ in range(num_layers)
+        # ])
 
-        # self.spin = [SpinBlock(
-        #     use_H_A=use_H_A,
-        #     data_dim=d_model, latent_dim=H_A_dim if use_H_A else d_model, latent_dim_mult=latent_dim_mult,
-        #     num_heads=num_spin_heads,
-        # )]
-        self.use_H_A = use_H_A
-        if use_H_A:
-            self.H_A_proj = nn.Linear(d_model, H_A_dim)
-        self.H_D = self.init_h_d(num_inds=num_induce, latent_dim=H_A_dim if use_H_A else d_model)
-        self.spin = nn.ModuleList([
-            SpinBlock(
-                use_H_A=use_H_A,
-                data_dim=d_model, latent_dim=H_A_dim if use_H_A else d_model, latent_dim_mult=latent_dim_mult,
-                num_heads=num_spin_heads,
-            )
-            for _ in range(num_layers)
-        ])
-        self.encoder = nn.ModuleList([
-            nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, batch_first=True)
-            for _ in range(num_layers)
-        ])
-        # encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, batch_first=True)
-        # self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+        self.spin = Spin(data_dim=d_model, latent_dim_mult=latent_dim_mult,
+                         use_H_A=use_H_A, H_A_dim=H_A_dim,
+                         num_induce=num_induce,
+                         num_heads=num_spin_heads,
+                         num_spin_blocks=num_spin_blocks)
+        encoder_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, batch_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
 
         self.bound_std = bound_std
 
@@ -124,22 +119,23 @@ class IPTNP(nn.Module):
         inp, tar_start_idx = self.construct_input(batch, autoreg)
         embedding = self.embedder(inp)
         spin_mask = self.create_spin_mask(batch, autoreg)
-        H_D = self.H_D.repeat(batch.xc.shape[0], 1, 1)
-        H_A = self.H_A_proj(embedding) if self.use_H_A else None
         trans_mask, num_tar = self.create_trans_mask(batch, autoreg)
 
-        # First spin-transformer layer
-        H_A, H_D = self.spin[0](x=embedding, H_A=H_A, H_D=H_D, mask=spin_mask)
-        inp_for_encode = torch.cat((H_D, embedding[:, tar_start_idx:]), dim=1)  # [:, tar_start_idx:, :]), dim=1)
-        out = self.encoder[0](inp_for_encode, trans_mask)
+        # H_D = self.H_D.repeat(batch.xc.shape[0], 1, 1)
+        # H_A = self.H_A_proj(embedding) if self.use_H_A else None
 
-        # Rest of spin-transformer layers
-        for s, t in zip(self.spin[1:], self.encoder[1:]):
-            H_A, H_D = s(x=embedding, H_A=H_A, H_D=H_D, mask=spin_mask)
-            inp_for_encode = torch.cat((H_D, out[:, -num_tar:]), dim=1)  # [:, tar_start_idx:, :]), dim=1)
-            out = t(inp_for_encode, trans_mask)
-
-        # induce = self.spin[0](embeddings, mask=spin_mask)
+        # # First spin-transformer layer
+        # H_A, H_D = self.spin[0](x=embedding, H_A=H_A, H_D=H_D, mask=spin_mask)
         # inp_for_encode = torch.cat((H_D, embedding[:, tar_start_idx:]), dim=1)  # [:, tar_start_idx:, :]), dim=1)
-        # out = self.encoder(inp_for_encode, mask=trans_mask)
+        # out = self.encoder[0](inp_for_encode, trans_mask)
+        #
+        # # Rest of spin-transformer layers
+        # for s, t in zip(self.spin[1:], self.encoder[1:]):
+        #     H_A, H_D = s(x=embedding, H_A=H_A, H_D=H_D, mask=spin_mask)
+        #     inp_for_encode = torch.cat((H_D, out[:, -num_tar:]), dim=1)  # [:, tar_start_idx:, :]), dim=1)
+        #     out = t(inp_for_encode, trans_mask)
+
+        H_D = self.spin(embedding, mask=spin_mask)
+        inp_for_encode = torch.cat((H_D, embedding[:, tar_start_idx:]), dim=1)  # [:, tar_start_idx:, :]), dim=1)
+        out = self.encoder(inp_for_encode, mask=trans_mask)
         return out[:, -num_tar:]
