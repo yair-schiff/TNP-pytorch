@@ -1,11 +1,10 @@
-import torch
-import time
 import logging
+import time
 from collections import OrderedDict
-import re
-import matplotlib
-from matplotlib import pyplot as plt
 from os.path import split, splitext
+
+import torch
+from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.tensorboard.summary import hparams
 

@@ -26,7 +26,7 @@ class ANP(nn.Module):
         self.denc = CrossAttnEncoder(
                 dim_x=dim_x,
                 dim_y=dim_y,
-                dim_hid=dim_hid,
+                dim_hid=dim_hid * (1 if self.use_latent_path else 2),
                 v_depth=enc_v_depth,
                 qk_depth=enc_qk_depth)
 
@@ -43,7 +43,7 @@ class ANP(nn.Module):
         self.dec = Decoder(
                 dim_x=dim_x,
                 dim_y=dim_y,
-                dim_enc=dim_hid + (dim_lat if self.use_latent_path else 0),
+                dim_enc=dim_hid + (dim_lat if self.use_latent_path else dim_hid),  # else dim_hid
                 dim_hid=dim_hid,
                 depth=dec_depth)
 

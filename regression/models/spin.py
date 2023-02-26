@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 
 from regression.models.attention import MultiHeadAttn
-from regression.models.modules import build_mlp
 
 
 class XABA(nn.Module):
@@ -11,12 +10,13 @@ class XABA(nn.Module):
         self.attr_xattn = MultiHeadAttn(dim_q=latent_dim, dim_k=data_dim, dim_v=data_dim,
                                         dim_out=latent_dim*latent_dim_mult,
                                         num_heads=num_heads)
-        self.post_attn = nn.Linear(latent_dim * latent_dim_mult, latent_dim)
+        # self.post_attn = nn.Linear(latent_dim * latent_dim_mult, latent_dim)
         # self.post_attn = build_mlp(dim_in=latent_dim*latent_dim_mult, dim_hid=latent_dim, dim_out=latent_dim, depth=2)
 
     def forward(self, x, H_A, mask=None):
-        attn = self.attr_xattn(q=H_A, k=x, v=x, mask=mask, permute_dims=True)
-        return self.post_attn(attn)
+        # attn = self.attr_xattn(q=H_A, k=x, v=x, mask=mask, permute_dims=True)
+        # return self.post_attn(attn)
+        return self.attr_xattn(q=H_A, k=x, v=x, mask=mask, permute_dims=True)
 
 
 class ABLA(nn.Module):
@@ -25,12 +25,13 @@ class ABLA(nn.Module):
         self.attr_attn = MultiHeadAttn(dim_q=latent_dim, dim_k=latent_dim, dim_v=latent_dim,
                                        dim_out=latent_dim*latent_dim_mult,
                                        num_heads=num_heads)
-        self.post_attn = nn.Linear(latent_dim*latent_dim_mult, latent_dim)
+        # self.post_attn = nn.Linear(latent_dim*latent_dim_mult, latent_dim)
         # self.post_attn = build_mlp(dim_in=latent_dim*latent_dim_mult, dim_hid=latent_dim, dim_out=latent_dim, depth=2)
 
     def forward(self, H):
-        attn = self.attr_attn(q=H, k=H, v=H, mask=None, permute_dims=True)
-        return self.post_attn(attn)
+        # attn = self.attr_attn(q=H, k=H, v=H, mask=None, permute_dims=True)
+        # return self.post_attn(attn)
+        return self.attr_attn(q=H, k=H, v=H, mask=None, permute_dims=True)
 
 
 class XABD(nn.Module):
@@ -39,23 +40,19 @@ class XABD(nn.Module):
         self.data_xattn = MultiHeadAttn(dim_q=latent_dim, dim_k=latent_dim, dim_v=latent_dim,
                                         dim_out=latent_dim*latent_dim_mult,
                                         num_heads=num_heads)
-        self.post_attn = nn.Linear(latent_dim*latent_dim_mult, latent_dim)
+        # self.post_attn = nn.Linear(latent_dim*latent_dim_mult, latent_dim)
         # self.post_attn = build_mlp(dim_in=latent_dim*latent_dim_mult, dim_hid=latent_dim, dim_out=latent_dim, depth=2)
 
-    @staticmethod
-    def build_mask(H_A_shape, current_ctx_size):
-        mask = torch.zeros(H_A_shape[0], H_A_shape[1]).fill_(float('-inf'))
-        mask[:, :current_ctx_size] = 0.0
-        return mask
-
     def forward(self, H_A, H_D, mask=None):
-        attn = self.data_xattn(q=H_D, k=H_A, v=H_A, mask=mask, permute_dims=False)  # bsz x num_induce x latent_dim
-        return self.post_attn(attn)
+        # attn = self.data_xattn(q=H_D, k=H_A, v=H_A, mask=mask, permute_dims=False)  # bsz x num_induce x latent_dim
+        # return self.post_attn(attn)
+        return self.data_xattn(q=H_D, k=H_A, v=H_A, mask=mask, permute_dims=False)  # bsz x num_induce x latent_dim
 
 
 class SpinBlock(nn.Module):
     def __init__(self,
                  use_H_A,
+                 use_ABLA_induce,
                  data_dim, latent_dim, latent_dim_mult,
                  num_heads
                  ):
@@ -74,14 +71,17 @@ class SpinBlock(nn.Module):
         self.xabd = XABD(latent_dim=latent_dim, latent_dim_mult=latent_dim_mult, num_heads=num_heads)
 
         # (Self) Attn Between Latent Attributes - induced latents
-        self.abla_induce = ABLA(latent_dim=latent_dim, latent_dim_mult=latent_dim_mult, num_heads=num_heads)
+        self.use_ABLA_induce = use_ABLA_induce
+        if use_ABLA_induce:
+            self.abla_induce = ABLA(latent_dim=latent_dim, latent_dim_mult=latent_dim_mult, num_heads=num_heads)
 
     def forward(self, x, H_A, H_D, mask=None):
         if self.use_H_A:
             H_A_prime = self.xaba(x=x, H_A=H_A, mask=mask)
             H_A = self.abla(H=H_A_prime)
-        H_D_prime = self.xabd(H_A=H_A if self.use_H_A else x, H_D=H_D, mask=mask)
-        H_D = self.abla_induce(H=H_D_prime)
+        H_D = self.xabd(H_A=H_A if self.use_H_A else x, H_D=H_D, mask=mask)
+        if self.use_ABLA_induce:
+            H_D = self.abla_induce(H=H_D)
         return H_A, H_D
 
 
@@ -90,11 +90,12 @@ class Spin(nn.Module):
                  data_dim=256,
                  latent_dim_mult=1,
                  use_H_A=False,
+                 use_ABLA_induce=True,
                  H_A_dim=1,
                  H_D_init='xavier',
                  num_induce=16,
                  num_heads=8,
-                 num_spin_blocks=8):
+                 num_spin_blocks=1):
         super().__init__()
         self.use_H_A = use_H_A
         if use_H_A:
@@ -103,6 +104,7 @@ class Spin(nn.Module):
         self.spin_blocks = nn.ModuleList([
             SpinBlock(
                 use_H_A=use_H_A,
+                use_ABLA_induce=use_ABLA_induce,
                 data_dim=data_dim, latent_dim=H_A_dim if use_H_A else data_dim, latent_dim_mult=latent_dim_mult,
                 num_heads=num_heads,
             )

@@ -43,16 +43,20 @@ class GPSampler(object):
             batch_size=16,
             num_ctx=None,
             num_tar=None,
-            min_num_ctx=3,  # Use to increase ctx points
+            min_num_ctx=3,
+            max_num_ctx=50,
             min_num_tar=3,
-            max_num_pts=50,
+            max_num_tar=50,
+            # max_num_pts=50,
             x_range=(-2, 2),
             device='cpu'):
 
         batch = AttrDict()
-        num_ctx = num_ctx or torch.randint(low=min_num_ctx, high=max_num_pts-min_num_tar, size=[1]).item()  # Nc
-        # num_tar = num_tar or max_num_pts - num_ctx
-        num_tar = num_tar or torch.randint(low=min_num_tar, high=max_num_pts-num_ctx, size=[1]).item()  # Nt
+        # num_ctx = num_ctx or torch.randint(low=min_num_ctx, high=max_num_pts-min_num_tar, size=[1]).item()  # Nc
+        # num_tar = num_tar or torch.randint(low=min_num_tar, high=max_num_pts-num_ctx, size=[1]).item()  # Nt
+        num_ctx = num_ctx or torch.randint(low=min_num_ctx, high=max_num_ctx+1, size=[1]).item()  # Nc
+        num_tar = num_tar or torch.randint(low=min_num_tar, high=max_num_tar+1, size=[1]).item()  # Nt
+
         num_points = num_ctx + num_tar  # N = Nc + Nt
         batch.x = x_range[0] + (x_range[1] - x_range[0]) \
                 * torch.rand([batch_size, num_points, 1], device=device)  # [B,N,Dx=1]

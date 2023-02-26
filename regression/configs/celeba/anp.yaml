@@ -7,3 +7,4 @@ enc_qk_depth: 3
 enc_pre_depth: 6
 enc_post_depth: 3
 dec_depth: 5
+use_latent_path: True

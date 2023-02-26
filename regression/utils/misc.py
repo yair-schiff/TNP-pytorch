@@ -91,34 +91,34 @@ def get_argparser(exp):
 
     # Data
     data_parser = parser.add_argument_group('Data Args')
-    data_parser.add_argument('--max_num_pts', type=int, default=50)
-    data_parser.add_argument('--min_num_ctx', type=int, default=3)
-    data_parser.add_argument('--min_num_tar', type=int, default=3)
+    data_parser.add_argument('--max_num_ctx', type=int, default=64)
+    data_parser.add_argument('--min_num_ctx', type=int, default=4)
+    data_parser.add_argument('--max_num_tar', type=int, default=64)
+    data_parser.add_argument('--min_num_tar', type=int, default=4)
 
     # Model
     model_parser = parser.add_argument_group('Model Args')
     model_parser.add_argument('--model', type=str,
-                              choices=["np", "anp", "cnp", "canp", "bnp", "banp", "tnpd", "tnpa", "tnpnd", "ipnp",
-                                       "iptnpd"])
+                              choices=["np", "anp", "cnp", "canp", "bnp", "banp", "tnpd", "tnpa", "tnpnd",
+                                       "ipanp", "ipcanp"])
 
     # Train
     train_parser = parser.add_argument_group('Train Args')
     train_parser.add_argument('--pretrain', action='store_true', default=False)
     train_parser.add_argument('--train_seed', type=int, default=0)
-    train_parser.add_argument('--train_batch_size', type=int, default=16)
+    train_parser.add_argument('--train_batch_size', type=int, default=16 if exp == 'gp' else 100)
     train_parser.add_argument('--train_num_samples', type=int, default=4)
     train_parser.add_argument('--lr', type=float, default=5e-4)
     train_parser.add_argument('--min_lr', type=float, default=0)
     train_parser.add_argument('--num_epochs', type=int, default=100000 if exp == 'gp' else 200)
     train_parser.add_argument('--annealer_mult', type=float, default=1.0)
-    train_parser.add_argument('--print_freq', type=int, default=200)
-    train_parser.add_argument('--eval_freq', type=int, default=5000)
-    train_parser.add_argument('--save_freq', type=int, default=1000)
+    train_parser.add_argument('--print_freq', type=int, default=200 if exp == 'gp' else 1)
+    train_parser.add_argument('--eval_freq', type=int, default=5000 if exp == 'gp' else 20)
+    train_parser.add_argument('--save_freq', type=int, default=1000 if exp == 'gp' else 10)
 
     # Eval
     eval_parser = parser.add_argument_group('Eval Args')
     eval_parser.add_argument('--eval_seed', type=int, default=0)
-    eval_parser.add_argument('--eval_num_batches', type=int, default=3000)
     eval_parser.add_argument('--eval_batch_size', type=int, default=16)
     eval_parser.add_argument('--eval_num_samples', type=int, default=50)
     eval_parser.add_argument('--eval_logfile', type=str, default=None)
@@ -138,10 +138,18 @@ def get_argparser(exp):
     if exp == 'gp':
         gp_parser = parser.add_argument_group('GP Args')
         gp_parser.add_argument('--eval_kernel', type=str, default='rbf', choices=['matern', 'periodic', 'rbf'])
+        gp_parser.add_argument('--eval_num_batches', type=int, default=3000)
+
 
     elif exp == 'emnist':
         emnist_parser = parser.add_argument_group('EMNIST Args')
         emnist_parser.add_argument('--class_range', type=int, nargs='*', default=[0, 10])
         emnist_parser.add_argument('--plot_num_imgs', type=int, default=16)
+
+    elif exp == 'celeba':
+        celeba_parser = parser.add_argument_group('CelebA Args')
+        celeba_parser.add_argument('--resize', type=int, default=64)
+        celeba_parser.add_argument('--target_all', action='store_true')
+        celeba_parser.add_argument('--plot_num_imgs', type=int, default=16)
 
     return parser

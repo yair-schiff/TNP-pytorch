@@ -5,7 +5,10 @@ while [ $# -gt 0 ]; do
     if [[ $1 == "--"* ]]; then
         v="${1/--/}"
         declare "$v"="$2"
-        shift
+        if [ -z ${2} ]; then
+          declare "$v"="True"  # store_true params
+          shift
+        fi
     fi
     shift
 done
@@ -43,13 +46,7 @@ fi
 base_results_dir="/share/kuleshov/yzs2/TNP-pytorch/regression/results"
 
 # Start building command line exports
-export_str="ALL,mode=${mode},model=${model}"
-
-#if [[ -z "${max_num_pts}" ]]; then
-#  max_num_pts=50
-#  echo "Missing GP parameter --max_num_pts. Defaulting to ${max_num_pts}."
-#fi
-#export_str="${export_str},max_num_pts=${max_num_pts}"
+export_str="ALL,exp=${exp},mode=${mode},model=${model}"
 
 if [[ -z "${seed}" ]]; then
   seed=0
@@ -66,21 +63,31 @@ if [[ -z "${min_num_ctx}" ]]; then
   echo "Missing parameter --min_num_ctx. Defaulting to ${min_num_ctx}."
 fi
 export_str="${export_str},min_num_ctx=${min_num_ctx}"
-if [[ -z "${max_num_tr}" ]]; then
+ctx_range="${min_num_ctx}-${max_num_ctx}"
+if [[ -z "${max_num_tar}" ]]; then
   max_num_tar=64
   echo "Missing parameter --max_num_tar. Defaulting to ${max_num_tar}."
 fi
 export_str="${export_str},max_num_tar=${max_num_tar}"
 if [[ -z "${min_num_tar}" ]]; then
   min_num_tar=4
-  echo "Missing GP parameter --min_num_tar. Defaulting to ${min_num_tar}."
+  echo "Missing parameter --min_num_tar. Defaulting to ${min_num_tar}."
 fi
 export_str="${export_str},min_num_tar=${min_num_tar}"
+tar_range="${min_num_tar}-${max_num_tar}"
 
 if [[ -z "${lr}" ]]; then
   lr=5e-4
 fi
 export_str="${export_str},lr=${lr}"
+if [[ -z "${num_epochs}" ]]; then
+  if [[ "${exp}" == "gp" ]]; then
+    num_epochs=100000
+  else
+    num_epochs=200
+  fi
+fi
+export_str="${export_str},num_epochs=${num_epochs}"
 if [[ -z "${min_lr}" ]]; then
   min_lr=0
 fi
@@ -90,12 +97,36 @@ if [[ -z "${annealer_mult}" ]]; then
 fi
 export_str="${export_str},annealer_mult=${annealer_mult}"
 
+exp_specific_args="--resume=resume"
 if [[ -n "${eval_logfile}" ]]; then
-  export_str="${export_str},eval_logfile=${eval_logfile}"
+  exp_specific_args="${exp_specific_args} --eval_logfile=${eval_logfile}"
+fi
+# GP:
+if [[ "${exp}" == "gp" ]]; then
+  if [[ -z "${eval_kernel}" ]]; then
+    eval_kernel="rbf"
+    echo "Missing GP parameter --eval_kernel. Defaulting to ${eval_kernel}."
+  fi
+  exp_specific_args="${exp_specific_args} --eval_kernel=${eval_kernel}"
+  results_dir="${base_results_dir}/${exp}/ctx-${ctx_range}_tar-${tar_range}/${model}"
+
+# CelebA:
+elif [[ "${exp}" == "celeba" ]]; then
+  if [[ -z "${resize}" ]]; then
+    resize=64
+    echo "Missing CelebA parameter --resize. Defaulting to ${resize}."
+  fi
+  exp_specific_args="${exp_specific_args} --resize=${resize}"
+  if [[ -n "${target_all}" ]]; then
+    exp_specific_args="${exp_specific_args} --target_all"
+    tar_range="all"
+  fi
+  results_dir="${base_results_dir}/${exp}/${resize}x${resize}/ctx-${ctx_range}_tar-${tar_range}/${model}"
+
 fi
 
-#  results_dir="${base_results_dir}/${exp}_maxpts-${max_num_pts}_minctx-${min_num_ctx}_mintar-${min_num_tar}/${model}"
-results_dir="${base_results_dir}/${exp}/ctx-${min_num_ctx}-${max_num_ctx}_tar-${min_num_tar}-${max_num_tar}/${model}"
+export_str="${export_str},exp_specific_args=${exp_specific_args}"
+
 # Build expid
 if [[ -z "${expid}" ]]; then
     echo "Missing parameter --expid; expid will be created automatically."
@@ -115,24 +146,12 @@ if [[ -z "${expid}" ]]; then
 fi
 export_str="${export_str},expid=${expid}"
 
-
-# GP:
-if [[ "${exp}" == "gp" ]]; then
-
-  if [[ -z "${eval_kernel}" ]]; then
-    eval_kernel="rbf"
-    echo "Missing GP parameter --eval_kernel. Defaulting to ${eval_kernel}."
-  fi
-  export_str="${export_str},eval_kernel=${eval_kernel}"
-
-  if [[ -z "${num_steps}" ]]; then
-    num_steps=100000
-  fi
-  export_str="${export_str},num_steps=${num_steps}"
+# Build job name and make log dir
+if [[ -z ${resize} ]]; then
+  job_name="${exp}_${model}_${expid}_ctx-${ctx_range}_tar-${tar_range}"
+else
+  job_name="${exp}_${resize}x${resize}_${model}_${expid}_ctx-${ctx_range}_tar-${tar_range}"
 fi
-
-# Build Job name / make log dir
-job_name="${exp}_${model}_${expid}_ctx-${min_num_ctx}-${max_num_ctx}_tar-${min_num_tar}-${max_num_tar}"
 log_dir="${results_dir}/${expid}/logs"
 mkdir -p "${log_dir}"
 
@@ -142,4 +161,4 @@ sbatch \
   --output="${log_dir}/${mode}_%j.out" \
   --error="${log_dir}/${mode}_%j.err" \
   --export="${export_str}" \
-  "run_${exp}.sh"
+  "run_trainer.sh"

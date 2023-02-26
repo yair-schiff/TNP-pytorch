@@ -29,15 +29,17 @@ def main():
 
     # Data
     data_parser = parser.add_argument_group('Data Args')
-    data_parser.add_argument('--max_num_pts', type=int, default=50)
+    # data_parser.add_argument('--max_num_pts', type=int, default=50)
+    data_parser.add_argument('--max_num_ctx', type=int, default=50)
     data_parser.add_argument('--min_num_ctx', type=int, default=3)
+    data_parser.add_argument('--max_num_tar', type=int, default=50)
     data_parser.add_argument('--min_num_tar', type=int, default=3)
 
     # Model
     model_parser = parser.add_argument_group('Model Args')
     model_parser.add_argument('--model', type=str,
                               choices=["np", "anp", "cnp", "canp", "bnp", "banp", "tnpd", "tnpa", "tnpnd", "ipnp",
-                                       "iptnpd"])
+                                       "iptnpd", "ipanp", "ipcanp"])
 
     # Train
     train_parser = parser.add_argument_group('Train Args')
@@ -50,7 +52,7 @@ def main():
     train_parser.add_argument('--num_steps', type=int, default=100000)
     train_parser.add_argument('--annealer_mult', type=float, default=1.0)
     train_parser.add_argument('--print_freq', type=int, default=200)
-    train_parser.add_argument('--eval_freq', type=int, default=5000)
+    train_parser.add_argument('--eval_freq', type=int, default=20000)
     train_parser.add_argument('--save_freq', type=int, default=1000)
 
     # Eval
@@ -78,7 +80,9 @@ def main():
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    args.exp_title = f'gp_maxpts-{args.max_num_pts}_minctx-{args.min_num_ctx}_mintar-{args.min_num_tar}'
+    # args.exp_title = f'gp_maxpts-{args.max_num_pts}_minctx-{args.min_num_ctx}_mintar-{args.min_num_tar}'
+    args.exp_title = osp.join('gp',
+                              f'ctx-{args.min_num_ctx}-{args.max_num_ctx}_tar-{args.min_num_tar}-{args.max_num_tar}')
     if args.expid is not None:
         args.root = osp.join(results_path, args.exp_title, args.model, args.expid)
     else:
@@ -93,7 +97,10 @@ def main():
     else:
         with open(f'configs/gp/{args.model}.yaml', 'r') as f:
             config = yaml.safe_load(f)
-            args.__dict__.update(config)
+        if 'ip' in args.model:  # TODO: Short term hack to get this running quickly
+            args.num_induce_ignore = config['num_induce']
+            config['num_induce'] = args.min_num_ctx // 2
+        args.__dict__.update(config)
         with open(osp.join(args.root, 'config.yaml'), 'w') as f:
             yaml.dump(config, f)
 
@@ -170,8 +177,10 @@ def train(args, model, device, tb=None):
         optimizer.zero_grad()
         batch = sampler.sample(
             batch_size=args.train_batch_size,
-            max_num_pts=args.max_num_pts,
+            # max_num_pts=args.max_num_pts,
+            max_num_ctx=args.max_num_ctx,
             min_num_ctx=args.min_num_ctx,
+            max_num_tar=args.max_num_tar,
             min_num_tar=args.min_num_tar,
             device=device)
 
@@ -179,16 +188,16 @@ def train(args, model, device, tb=None):
         if step == start_step == 1:
             with torch.no_grad():
                 with Capturing() as output:
-                    if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
-                        summary(model, batch, num_samples=args.train_num_samples)  # TODO: commented this out num_samples=args.train_num_samples)
+                    if args.model in ["np", "anp", "cnp", "bnp", "banp", "ipanp"]:
+                        summary(model, batch, num_samples=args.train_num_samples)
                     else:
                         summary(model, batch)
             with open(os.path.join(args.root, 'param_count.txt'), 'w') as pf:
                 for line in output:
                     pf.write(line + '\n')
         step_start_time = time.time()
-        if args.model in ["np", "anp", "cnp", "canp", "bnp", "banp"]:
-            outs = model(batch, num_samples=args.train_num_samples)  # TODO: commented this out num_samples=args.train_num_samples)
+        if args.model in ["np", "anp", "cnp", "bnp", "banp", "ipanp"]:
+            outs = model(batch, num_samples=args.train_num_samples)
         else:
             outs = model(batch)
 
@@ -261,8 +270,10 @@ def gen_evalset(args, device):
     for _ in tqdm(range(args.eval_num_batches), ascii=True):
         batches.append(sampler.sample(
             batch_size=args.eval_batch_size,
-            max_num_pts=args.max_num_pts,
+            # max_num_pts=args.max_num_pts,
+            max_num_ctx=args.max_num_ctx,
             min_num_ctx=args.min_num_ctx,
+            max_num_tar=args.max_num_tar,
             min_num_tar=args.min_num_tar,
             device=device))
 
@@ -312,8 +323,8 @@ def eval(args, model, device, train_step=None, tb=None):
             for i, batch in tqdm(enumerate(eval_batches), ascii=True):
                 for key, val in batch.items():
                     batch[key] = val.to(device)
-                if args.model in ["np", "anp", "bnp", "banp"]:
-                    outs = model(batch, num_samples=args.eval_num_samples)   # TODO: Commented this - args.eval_num_samples)
+                if args.model in ["np", "anp", "bnp", "banp", "ipanp"]:
+                    outs = model(batch, num_samples=args.eval_num_samples)
                 else:
                     outs = model(batch)
 
@@ -450,9 +461,11 @@ def plot(args, model, device):
     xp = torch.linspace(-2, 2, 200).to(device)
     batch = sampler.sample(
         batch_size=args.plot_batch_size,
-        max_num_pts=args.max_num_pts,
-        num_ctx=args.plot_num_ctx,
-        num_tar=args.plot_num_tar,
+        # max_num_pts=args.max_num_pts,
+        max_num_ctx=args.max_num_ctx,
+        min_num_ctx=args.min_num_ctx,
+        max_num_tar=args.max_num_tar,
+        min_num_tar=args.min_num_tar,
         device=device,
     )
 
