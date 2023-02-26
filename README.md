@@ -1,40 +1,57 @@
-# Transformer Neural Processes: Uncertainty-Aware Meta Learning Via Sequence Modeling
+# Inducing Point Neural Processes
 
-This is the official implementation of the paper [Transformer Neural Processes: Uncertainty-Aware Meta Learning Via Sequence Modeling](https://arxiv.org/abs/2207.04179) in Pytorch. We propose Transformer Neural Processes (TNPs), a new member of the Neural Processes family that casts uncertainty-aware meta learning as a sequence modeling problem. We learn TNPs via an autoregressive likelihood-based objective and instantiate it with a novel transformer-based architecture. TNPs achieve state-ofthe-art performance on various benchmark problems, outperforming all previous NP variants on meta regression, image completion, contextual multi-armed bandits, and Bayesian optimization.
+This repository is used to implement the Neural Processes experiments from [Semi Parametric Inducing Point Networks](https://openreview.net/forum?id=FE99-fDrWd5).
 
-<img width="100%" src="./tnp.png">
+## Acknowledgements
+This repository is largely based on the implementation of [Transformer Neural Processes](https://github.com/tung-nd/TNP-pytorch), which in turn was based on [Bootstrapping Neural Processes](https://github.com/juho-lee/bnp).
 
 ## Install
 
-First, clone the repository:
+Install the dependencies as listed in `ipnp_env.yml` and activate the environment:
 
-```
-git clone https://github.com/tung-nd/TNP-pytorch.git
-```
-
-Then install the dependencies as listed in `env.yml` and activate the environment:
-
-```
-conda env create -f env.yml
-conda activate tnp
+```shell
+conda env create -f ipnp_env.yml
+conda activate ipnp
 ```
 
 ## Usage
 
-Please check the directory of each task for specific usage.
+Use the `run_regression_trainer_slurm.sh` to launch regression jobs using a SLURM queue manager:
+```
+./run_regression_trainer_slurm.sh \
+  --exp <gp |celeba> \
+  --mode <train | eval> \
+  --model <anp | banp | canp | ipanp | ipcanp> \
+  --seed <seed> \
+  --max_num_ctx <max_num_ctx> \
+  --min_num_ctx <min_num_ctx> \
+  --max_num_tar 64 \
+  --min_num_tar 4 
+```
+
+To run the `trainer.py` file directly:
+```
+cd ./regression
+python trainer.py <gp | celeba> <train | eval>
+  --train_seed=<seed> \
+  --eval_seed=<seed> \
+  --model=<anp | banp | canp | ipanp | ipcanp> \
+  --max_num_ctx=<max_num_ctx> \
+  --min_num_ctx=<min_num_ctx> \
+  --max_num_tar=64 \
+  --min_num_tar=4
+```
+
 
 ## Citation
 
 If you find this repo useful in your research, please consider citing our paper:
 ```
-@article{nguyen2022transformer,
-  title={Transformer neural processes: Uncertainty-aware meta learning via sequence modeling},
-  author={Nguyen, Tung and Grover, Aditya},
-  journal={arXiv preprint arXiv:2207.04179},
-  year={2022}
+@inproceedings{rastogi2023semi,
+    title={Semi Parametric Inducing Point Networks},
+    author={Richa Rastogi and Yair Schiff and Alon Hacohen and Zhaozhi Li and Ian Lee and Yuntian Deng and Mert R. Sabuncu and Volodymyr Kuleshov},
+    booktitle={International Conference on Learning Representations},
+    year={2023},
+    url={https://openreview.net/forum?id=FE99-fDrWd5}
 }
 ```
-
-## Acknowledgement
-
-The implementation of the baselines is borrowed from the official code base of [Bootstrapping Neural Processes](https://github.com/juho-lee/bnp).

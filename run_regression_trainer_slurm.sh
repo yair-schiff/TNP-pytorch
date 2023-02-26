@@ -20,7 +20,7 @@ function usage {
     echo ""
     echo "usage: ${programname} --exp string --mode string --model string --expid string "
     echo ""
-    echo "  --exp string            Which experiment to run: [gp | celeba | eminst]"
+    echo "  --exp string            Which experiment to run: [gp | celeba]"
     echo "  --mode string           Usage: train/eval"
     echo "  --model string          Model to use"
     echo "  --expid string          Unique name to give experiment (optional)"
@@ -43,7 +43,7 @@ elif [[ -z "${model}" ]]; then
     die "Missing parameter --model"
 fi
 
-base_results_dir="/share/kuleshov/yzs2/TNP-pytorch/regression/results"
+base_results_dir="./regression/results"
 
 # Start building command line exports
 export_str="ALL,exp=${exp},mode=${mode},model=${model}"
@@ -161,4 +161,4 @@ sbatch \
   --output="${log_dir}/${mode}_%j.out" \
   --error="${log_dir}/${mode}_%j.err" \
   --export="${export_str}" \
-  "run_trainer.sh"
+  "regression_trainer.sh"

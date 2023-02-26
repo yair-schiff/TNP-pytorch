@@ -48,6 +48,7 @@ class MultiHeadAttn(nn.Module):
         out = self.ln2(out + F.relu(self.fc_out(out)))
         return out
 
+
 class SelfAttn(MultiHeadAttn):
     def __init__(self, dim_in, dim_out, num_heads=8):
         super().__init__(dim_in, dim_in, dim_in, dim_out, num_heads)

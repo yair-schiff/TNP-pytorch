@@ -11,7 +11,6 @@ from torchsummaryX import summary
 from tqdm import tqdm
 
 from regression.data.celeba import CelebA
-from regression.data.emnist import EMNIST
 from regression.data.gp import GPSampler, RBFKernel, Matern52Kernel, PeriodicKernel
 from regression.data.image import img_to_task
 from regression.utils.log import get_logger, RunningAverage, CustomSummaryWriter
@@ -42,7 +41,7 @@ class RegressionTrainer:
         else:
             with open(f'configs/{exp}/{args.model}.yaml', 'r') as f:
                 config = yaml.safe_load(f)
-            if 'ip' in args.model:  # TODO: Short term hack to get this running quickly
+            if 'ip' in args.model:  # TODO: For inducing point models, use h = (context size lower bound // 2)
                 args.num_induce_ignore = config['num_induce']
                 config['num_induce'] = args.min_num_ctx // 2
             args.__dict__.update(config)
@@ -320,61 +319,6 @@ class GPTrainer(RegressionTrainer):
 
         if not osp.isdir(path):
             os.makedirs(path)
-        torch.save(batches, osp.join(path, filename))
-
-
-class EmnistTrainer(RegressionTrainer):
-    def __init__(self, argv):
-        super(EmnistTrainer, self).__init__('emnist', argv)
-        train_ds = EMNIST(train=True, class_range=self.args.class_range)
-        self.train_loader = torch.utils.data.DataLoader(train_ds,
-                                                        batch_size=self.args.train_batch_size,
-                                                        shuffle=True, num_workers=0)
-
-    def get_train_batch(self):
-        x = next(self.train_loader).to(self.device)
-        return img_to_task(x, max_num_points=self.args.max_num_points)
-
-    def get_eval_logfile(self):
-        if not self.args.eval_logfile:
-            c1, c2 = self.args.class_range
-            eval_logfile = f'eval_{c1}-{c2}'
-            if self.args.t_noise is not None:
-                eval_logfile += f'_{self.args.t_noise}'
-            eval_logfile += '.log'
-        else:
-            eval_logfile = self.args.eval_logfile
-        return eval_logfile
-
-    def get_eval_path(self):
-        path = osp.join(evalsets_path, 'emnist')
-        c1, c2 = self.args.class_range
-        filename = f'{c1}-{c2}'
-        if self.args.t_noise is not None:
-            filename += f'_{self.args.t_noise}'
-        filename += '.tar'
-        if not osp.isfile(osp.join(path, filename)):
-            print('generating evaluation sets...')
-            self.gen_evalset(path, filename)
-
-    def gen_evalset(self, path, filename):
-        torch.manual_seed(self.args.eval_seed)
-        torch.cuda.manual_seed(self.args.eval_seed)
-
-        eval_ds = EMNIST(train=False, class_range=self.args.class_range)
-        eval_loader = torch.utils.data.DataLoader(eval_ds,
-                                                  batch_size=self.args.eval_batch_size,
-                                                  shuffle=False, num_workers=0)
-
-        batches = []
-        for x, _ in tqdm(eval_loader, ascii=True):
-            batches.append(img_to_task(
-                x, max_num_points=self.args.max_num_points,
-                t_noise=self.args.t_noise)
-            )
-
-        torch.manual_seed(time.time())
-        torch.cuda.manual_seed(time.time())
         torch.save(batches, osp.join(path, filename))
 
 

@@ -43,15 +43,18 @@ def hrminsec(duration):
     mins, secs = left // 60, left % 60
     return f"{hours}hrs {mins}mins {secs}secs"
 
+
 class Capturing(list):
     def __enter__(self):
         self._stdout = sys.stdout
         sys.stdout = self._stringio = StringIO()
         return self
+
     def __exit__(self, *args):
         self.extend(self._stringio.getvalue().splitlines())
         del self._stringio    # free up some memory
         sys.stdout = self._stdout
+
 
 def forward_plot_func(nt, batch, mean, std, ll):
     fig, ax = plt.subplots(nrows=4, ncols=4, figsize=(24, 24), tight_layout=True)
@@ -139,12 +142,6 @@ def get_argparser(exp):
         gp_parser = parser.add_argument_group('GP Args')
         gp_parser.add_argument('--eval_kernel', type=str, default='rbf', choices=['matern', 'periodic', 'rbf'])
         gp_parser.add_argument('--eval_num_batches', type=int, default=3000)
-
-
-    elif exp == 'emnist':
-        emnist_parser = parser.add_argument_group('EMNIST Args')
-        emnist_parser.add_argument('--class_range', type=int, nargs='*', default=[0, 10])
-        emnist_parser.add_argument('--plot_num_imgs', type=int, default=16)
 
     elif exp == 'celeba':
         celeba_parser = parser.add_argument_group('CelebA Args')

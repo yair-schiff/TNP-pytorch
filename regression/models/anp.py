@@ -4,7 +4,7 @@ from attrdict import AttrDict
 from torch.distributions import kl_divergence
 
 from regression.models.modules import CrossAttnEncoder, PoolingEncoder, Decoder
-from regression.utils.misc import stack, logmeanexp, forward_plot_func
+from regression.utils.misc import stack, logmeanexp
 
 
 class ANP(nn.Module):
@@ -52,8 +52,7 @@ class ANP(nn.Module):
         if self.use_latent_path:
             if z is None:
                 pz = self.lenc(xc, yc)
-                z = pz.rsample() if num_samples is None \
-                        else pz.rsample([num_samples])
+                z = pz.rsample() if num_samples is None else pz.rsample([num_samples])
             z = stack(z, xt.shape[-2], -2)
             encoded = torch.cat([theta, z], -1)
         else:
